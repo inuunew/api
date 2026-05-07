@@ -1,21 +1,22 @@
-/*
-  Danzz For You 💌
-*/
+// index.ts
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { loadRouter, initAutoLoad } from './src/autoload';
+
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
 app.set('trust proxy', true);
+
 const configNya = [
     path.join(__dirname, 'src', 'config.json'),
     path.join(__dirname, '..', 'src', 'config.json'),
     path.join(process.cwd(), 'src', 'config.json'),
     path.join('/var/task/src/config.json')
 ];
+
 let configPath = '';
 for (const p of configNya) {
     if (fs.existsSync(p)) {
@@ -23,10 +24,12 @@ for (const p of configNya) {
         break;
     }
 }
+
 if (!configPath) {
     console.error('[✗] Config file not found');
     process.exit(1);
 }
+
 let config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 const visitor_db = path.join('/tmp', 'visitors.json');
 const recentRequests: string[] = [];
@@ -42,6 +45,7 @@ const visit = (): number => {
         return 0; 
     }
 };
+
 const incrementVisitor = (): void => {
     try {
         let count = visit();
@@ -49,12 +53,14 @@ const incrementVisitor = (): void => {
         fs.writeFileSync(visitor_db, JSON.stringify({ count }));
     } catch (error) {}
 };
+
 const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
 };
+
 const formatUptime = (seconds: number) => {
     const d = Math.floor(seconds / (3600 * 24));
     const h = Math.floor((seconds % (3600 * 24)) / 3600);
@@ -62,9 +68,11 @@ const formatUptime = (seconds: number) => {
     const s = Math.floor(seconds % 60);
     return `${d}d ${h}h ${m}m ${s}s`;
 };
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
 app.use((req: Request, res: Response, next: NextFunction) => {
     res.on('finish', () => {
         const ignored = ['/stats', '/stats/data', '/src', '/docs', '/config', '/favicon.ico', '/'];
@@ -83,9 +91,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     });
     next();
 });
+
 app.use(express.static(path.join(process.cwd(), 'public')));
 app.use('/src', express.static(path.join(process.cwd(), 'src')));
+
+// Muat routing
 loadRouter(app, config);
+
 app.get('/stats/data', (req: Request, res: Response) => {
     try {
         const totalMem = os.totalmem();
@@ -119,9 +131,11 @@ app.get('/stats/data', (req: Request, res: Response) => {
         res.status(500).json({ status: false });
     }
 });
+
 app.get('/stats', (req: Request, res: Response) => {
     res.sendFile(path.join(process.cwd(), 'public', 'stats.html'));
 });
+
 app.get('/config', (req: Request, res: Response) => {
     try {
         const currentConfig = JSON.parse(JSON.stringify(config));
@@ -129,11 +143,16 @@ app.get('/config', (req: Request, res: Response) => {
         res.json({ creator: config.settings.creator, ...currentConfig });
     } catch (error) { res.status(500).json({ creator: config.settings.creator, error: "Internal Server Error" }); }
 });
+
 app.get('/', (req: Request, res: Response) => {
     incrementVisitor();
     res.sendFile(path.join(process.cwd(), 'public', 'landing.html'));
 });
-app.get('/docs', (req: Request, res: Response) => { res.sendFile(path.join(process.cwd(), 'public', 'docs.html')); });
+
+app.get('/docs', (req: Request, res: Response) => { 
+    res.sendFile(path.join(process.cwd(), 'public', 'docs.html')); 
+});
+
 app.use((req: Request, res: Response) => {
     if (req.accepts('html')) {
         const possible404 = [path.join(process.cwd(), 'public', '404.html'), path.join(__dirname, 'public', '404.html')];
@@ -141,8 +160,15 @@ app.use((req: Request, res: Response) => {
     }
     res.status(404).json({ status: false, creator: config.settings.creator, message: "Route not found" });
 });
+
 initAutoLoad(app, config, configPath);
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+
+// Pencegahan bentrok port di environment production (Vercel)
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+// WAJIB UNTUK VERCEL: Export aplikasi express
 export default app;
