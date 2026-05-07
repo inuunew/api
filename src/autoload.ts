@@ -1,10 +1,9 @@
-/*
-  Danzz For You 💌
-*/
+// src/autoload.ts
 import { Application, Request, Response, NextFunction } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logRouterRequest } from './logger';
+import { routeRegistry } from './registry'; // Import Static Registry
 
 let regRouter = new Set<string>();
 let currentConfig: any = null;
@@ -16,59 +15,27 @@ export const initAutoLoad = (app: Application, config: any, configPath: string) 
     
     console.log('[✓] Auto Load Activated');
     
-    if (fs.existsSync(configPath)) {
-        fs.watch(configPath, (eventType, filename) => {
-            if (filename && eventType === 'change') {
-                console.log(`Config file changed: ${filename}`);
-                try {
-                    const newConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-                    currentConfig = newConfig;
-                    console.log('[✓] Config reloaded successfully');
-                    reloadRouter();
-                } catch (error) {
-                    console.error('[ㄨ] Failed to reload config:', error);
+    // Matikan fs.watch saat berjalan di Vercel (karena Vercel bersifat Read-Only & Stateless)
+    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
+
+    if (!isVercel) {
+        if (fs.existsSync(configPath)) {
+            fs.watch(configPath, (eventType, filename) => {
+                if (filename && eventType === 'change') {
+                    console.log(`Config file changed: ${filename}`);
+                    try {
+                        const newConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+                        currentConfig = newConfig;
+                        console.log('[✓] Config reloaded successfully');
+                        reloadRouter();
+                    } catch (error) {
+                        console.error('[ㄨ] Failed to reload config:', error);
+                    }
                 }
-            }
-        });
-    }
-
-    const routerDir = path.join(process.cwd(), 'router');
-    if (fs.existsSync(routerDir)) {
-        console.log(`[i] Watching router directory: ${routerDir}`);
-        fs.watch(routerDir, { recursive: true }, (eventType, filename) => {
-            if (filename && (filename.endsWith('.ts') || filename.endsWith('.js'))) {
-                console.log(`[✓] Route file changed: ${filename}`);
-                
-                const fullPath = path.join(routerDir, filename);
-                
-                if (require.cache[fullPath]) {
-                    delete require.cache[fullPath];
-                }
-                
-                console.log(`Route cache cleared for: ${filename}`);
-                reloadSingleRoute(filename);
-            }
-        });
-    } else {
-        console.warn(`[!] Router directory not found at: ${routerDir}`);
-    }
-};
-
-const reloadSingleRoute = (filename: string) => {
-    const normalized = filename.split(path.sep).join('/');
-    const parts = normalized.split('/');
-    
-    const category = parts.length > 1 ? parts[parts.length - 2] : null; 
-    const fileNameWithExt = parts[parts.length - 1];
-    const routeName = fileNameWithExt.replace(/\.(ts|js)$/, '');
-
-    if (category && currentConfig?.tags?.[category]) {
-        const route = currentConfig.tags[category].find((r: any) => r.filename === routeName);
-        if (route) {
-            const routeKey = `${route.method}:${route.endpoint}`;
-            regRouter.delete(routeKey);
-            registerRoute(route, category);
+            });
         }
+    } else {
+        console.log('[i] Running on Vercel: Watch mode disabled.');
     }
 };
 
@@ -107,33 +74,13 @@ const registerRoute = (route: any, category: string, creatorName?: string, app?:
         return;
     }
 
-    const possibleBaseDirs = [
-        path.join(__dirname, '..', 'router', category),
-        path.join(process.cwd(), 'router', category),
-        path.join(process.cwd(), 'dist', 'router', category)
-    ];
+    // --- MENGGUNAKAN STATIC REGISTRY ---
+    // Mencocokkan nama folder/file dari config.json ke dalam object routeRegistry
+    const registryKey = `${category}/${route.filename}`;
+    const handlerModule = routeRegistry[registryKey];
 
-    const extensions = ['.ts', '.js'];
-    let modulePath = '';
-
-    outerLoop:
-    for (const dir of possibleBaseDirs) {
-        for (const ext of extensions) {
-            const attemptPath = path.join(dir, `${route.filename}${ext}`);
-            if (fs.existsSync(attemptPath)) {
-                modulePath = attemptPath;
-                break outerLoop;
-            }
-        }
-    }
-    
-    if (modulePath) {
+    if (handlerModule) {
         try {
-            try {
-                delete require.cache[require.resolve(modulePath)];
-            } catch (e) {}
-
-            const handlerModule = require(modulePath);
             const handler = handlerModule.default || handlerModule;
 
             if (typeof handler === 'function') {
@@ -156,7 +103,7 @@ const registerRoute = (route: any, category: string, creatorName?: string, app?:
                         await handler(req, res, next);
                     } catch (err) {
                         console.error(`Error in route ${route.endpoint}:`, err);
-                        res.status(500).json({ error: 'Internal Server Error', message: err instanceof Error ? err.message : String(err) });
+                        res.status(500).json({ status: false, error: 'Internal Server Error', message: err instanceof Error ? err.message : String(err) });
                     }
                 };
 
@@ -164,14 +111,14 @@ const registerRoute = (route: any, category: string, creatorName?: string, app?:
                 else if (route.method === 'POST') targetApp.post(route.endpoint, wrappedHandler);
                 
                 regRouter.add(routeKey);
-                console.log(`[✓] LOADED: ${route.method} ${route.endpoint} -> ${path.basename(modulePath)}`);
+                console.log(`[✓] LOADED: ${route.method} ${route.endpoint} -> from registry`);
             } else {
-                console.error(`[ㄨ] Invalid handler type in ${modulePath}. Expected function, got ${typeof handler}`);
+                console.error(`[ㄨ] Invalid handler type for ${registryKey}. Expected function.`);
             }
         } catch (error) {
-            console.error(`[ㄨ] Failed to load route ${route.endpoint} from ${modulePath}:`, error);
+            console.error(`[ㄨ] Failed to load route ${route.endpoint}:`, error);
         }
     } else {
-        console.error(`[!] FILE NOT FOUND: router/${category}/${route.filename}.ts`);
+        console.error(`[!] FILE NOT FOUND IN REGISTRY: ${registryKey}. Please add it to src/registry.ts!`);
     }
 };
