@@ -1,9 +1,8 @@
-// src/autoload.ts
 import { Application, Request, Response, NextFunction } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logRouterRequest } from './logger';
-import { routeRegistry } from './registry'; // Import Static Registry
+import { routeRegistry } from './registry';
 
 let regRouter = new Set<string>();
 let currentConfig: any = null;
@@ -15,7 +14,6 @@ export const initAutoLoad = (app: Application, config: any, configPath: string) 
     
     console.log('[✓] Auto Load Activated');
     
-    // Matikan fs.watch saat berjalan di Vercel (karena Vercel bersifat Read-Only & Stateless)
     const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
 
     if (!isVercel) {
@@ -74,8 +72,6 @@ const registerRoute = (route: any, category: string, creatorName?: string, app?:
         return;
     }
 
-    // --- MENGGUNAKAN STATIC REGISTRY ---
-    // Mencocokkan nama folder/file dari config.json ke dalam object routeRegistry
     const registryKey = `${category}/${route.filename}`;
     const handlerModule = routeRegistry[registryKey];
 
@@ -111,14 +107,14 @@ const registerRoute = (route: any, category: string, creatorName?: string, app?:
                 else if (route.method === 'POST') targetApp.post(route.endpoint, wrappedHandler);
                 
                 regRouter.add(routeKey);
-                console.log(`[✓] LOADED: ${route.method} ${route.endpoint} -> from registry`);
+                console.log(`[✓] LOADED: ${route.method} ${route.endpoint}`);
             } else {
-                console.error(`[ㄨ] Invalid handler type for ${registryKey}. Expected function.`);
+                console.error(`[ㄨ] Invalid handler type for ${registryKey}`);
             }
         } catch (error) {
             console.error(`[ㄨ] Failed to load route ${route.endpoint}:`, error);
         }
     } else {
-        console.error(`[!] FILE NOT FOUND IN REGISTRY: ${registryKey}. Please add it to src/registry.ts!`);
+        console.error(`[!] FILE NOT FOUND IN REGISTRY: ${registryKey}`);
     }
 };
