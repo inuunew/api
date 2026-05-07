@@ -5,7 +5,11 @@
       "src": "index.ts",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["src/config.json", "visitors.json", "public/**"]
+        "includeFiles": [
+          "src/config.json",
+          "src/reminder.json",
+          "public/**"
+        ]
       }
     }
   ],
