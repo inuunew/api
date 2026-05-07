@@ -1,4 +1,6 @@
-
+/*
+  Danzz For You 💌
+*/
 import { Application, Request, Response, NextFunction } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,24 +16,21 @@ export const initAutoLoad = (app: Application, config: any, configPath: string) 
     
     console.log('[✓] Auto Load Activated');
     
-    // Matikan fs.watch jika aplikasi sedang berjalan di Vercel
-    const isVercel = process.env.VERCEL || process.env.NODE_ENV === 'production';
-
-    if (!isVercel) {
-        // Logika fs.watch kamu tetap berjalan aman di localhost (komputer lokal)
-        if (fs.existsSync(configPath)) {
-             // ... isi fs.watch configPath ...
-        }
-
-        const routerDir = path.join(process.cwd(), 'router');
-        if (fs.existsSync(routerDir)) {
-             // ... isi fs.watch routerDir ...
-        }
-    } else {
-        console.log('[i] Running on Vercel: Watch mode disabled.');
+    if (fs.existsSync(configPath)) {
+        fs.watch(configPath, (eventType, filename) => {
+            if (filename && eventType === 'change') {
+                console.log(`Config file changed: ${filename}`);
+                try {
+                    const newConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+                    currentConfig = newConfig;
+                    console.log('[✓] Config reloaded successfully');
+                    reloadRouter();
+                } catch (error) {
+                    console.error('[ㄨ] Failed to reload config:', error);
+                }
+            }
+        });
     }
-};
-
 
     const routerDir = path.join(process.cwd(), 'router');
     if (fs.existsSync(routerDir)) {
