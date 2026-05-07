@@ -14,5 +14,13 @@
       "src": "/(.*)",
       "dest": "index.ts"
     }
-  ]
+  ], 
+  [
+  "functions": {
+    "api/**/*.ts": {
+      "includeFiles": "router/**"
+    }
+  }
+]
+
 }
