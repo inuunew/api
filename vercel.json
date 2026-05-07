@@ -3,10 +3,7 @@
   "builds": [
     {
       "src": "index.ts",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": ["src/config.json", "visitors.json", "public/**"]
-      }
+      "use": "@vercel/node"
     }
   ],
   "routes": [
@@ -14,13 +11,14 @@
       "src": "/(.*)",
       "dest": "index.ts"
     }
-  ], 
-  [
+  ],
   "functions": {
-    "api/**/*.ts": {
-      "includeFiles": "router/**"
+    "index.ts": {
+      "includeFiles": [
+        "src/config.json",
+        "public/**",
+        "router/**"
+      ]
     }
   }
-]
-
 }
