@@ -3,20 +3,13 @@
   "builds": [
     {
       "src": "index.ts",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "src/config.json",
-          "src/reminder.json",
-          "public/**"
-        ]
-      }
+      "use": "@vercel/node"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "index.ts"
+      "source": "/(.*)",
+      "destination": "/index.ts"
     }
   ]
 }
