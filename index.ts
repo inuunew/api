@@ -1,24 +1,28 @@
-// index.ts
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { loadRouter, initAutoLoad } from './src/autoload';
+
+// 1. IMPORT DIRECT (Bypass Autoload untuk Vercel)
+import bratHandler from './router/maker/brat';
+// Import handler lain di sini jika ingin didaftarkan manual
+// import tiktokHandler from './router/download/tiktok';
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
 app.set('trust proxy', true);
 
-const configNya = [
+// Mencari file config di berbagai kemungkinan path (Vercel vs Lokal)
+const configPaths = [
+    path.join(process.cwd(), 'src', 'config.json'),
     path.join(__dirname, 'src', 'config.json'),
     path.join(__dirname, '..', 'src', 'config.json'),
-    path.join(process.cwd(), 'src', 'config.json'),
-    path.join('/var/task/src/config.json')
+    '/var/task/src/config.json'
 ];
 
 let configPath = '';
-for (const p of configNya) {
+for (const p of configPaths) {
     if (fs.existsSync(p)) {
         configPath = p;
         break;
@@ -34,24 +38,21 @@ let config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 const visitor_db = path.join('/tmp', 'visitors.json');
 const recentRequests: string[] = [];
 
+// Helper Functions
 const visit = (): number => {
     try {
         if (fs.existsSync(visitor_db)) {
-            const data = fs.readFileSync(visitor_db, 'utf-8');
-            return JSON.parse(data).count;
+            return JSON.parse(fs.readFileSync(visitor_db, 'utf-8')).count;
         }
         return parseInt(config.settings.visitors || "0");
-    } catch (error) { 
-        return 0; 
-    }
+    } catch { return 0; }
 };
 
-const incrementVisitor = (): void => {
+const incrementVisitor = () => {
     try {
-        let count = visit();
-        count++;
+        let count = visit() + 1;
         fs.writeFileSync(visitor_db, JSON.stringify({ count }));
-    } catch (error) {}
+    } catch {}
 };
 
 const formatBytes = (bytes: number) => {
@@ -69,22 +70,17 @@ const formatUptime = (seconds: number) => {
     return `${d}d ${h}h ${m}m ${s}s`;
 };
 
+// Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Logger & Recent Requests
 app.use((req: Request, res: Response, next: NextFunction) => {
     res.on('finish', () => {
         const ignored = ['/stats', '/stats/data', '/src', '/docs', '/config', '/favicon.ico', '/'];
-        const isIgnored = ignored.some(p => req.path.startsWith(p) || req.path === '/');
-        if (!isIgnored) {
-            const method = req.method;
-            const status = res.statusCode;
-            const host = req.get('host');
-            const protocol = req.protocol; 
-            let cleanUrl = req.originalUrl.replace(/(=)[^&]+/g, '$1');
-            const fullUrl = `${protocol}://${host}${cleanUrl}`;
-            const logLine = `[${method}] [${status}] ${fullUrl}`;
+        if (!ignored.some(p => req.path.startsWith(p) || req.path === '/')) {
+            const logLine = `[${req.method}] [${res.statusCode}] ${req.protocol}://${req.get('host')}${req.originalUrl.split('=')[0]}=`;
             recentRequests.push(logLine);
             if (recentRequests.length > 50) recentRequests.shift();
         }
@@ -92,83 +88,67 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     next();
 });
 
+// Static Files
 app.use(express.static(path.join(process.cwd(), 'public')));
 app.use('/src', express.static(path.join(process.cwd(), 'src')));
 
-// Muat routing
-loadRouter(app, config);
+// --- CUSTOM ROUTING LOGIC ---
 
-app.get('/stats/data', (req: Request, res: Response) => {
+// Interceptor untuk menyuntikkan creator name ke JSON response
+const injectCreator = (req: Request, res: Response, next: NextFunction) => {
+    const originalJson = res.json;
+    res.json = function (body) {
+        if (body && typeof body === 'object' && !Array.isArray(body)) {
+            return originalJson.call(this, { creator: config.settings.creator, ...body });
+        }
+        return originalJson.call(this, body);
+    };
+    next();
+};
+
+// 2. DAFTARKAN ENDPOINT SECARA MANUAL (Pasti tembus Vercel)
+app.get('/api/maker/brat', injectCreator, async (req: Request, res: Response) => {
     try {
-        const totalMem = os.totalmem();
-        const freeMem = os.freemem();
-        const usedMem = totalMem - freeMem;
-        const cpus = os.cpus();    
-        res.json({
-            status: true,
-            server: {
-                platform: os.platform(),
-                arch: os.arch(),
-                hostname: os.hostname(),
-                uptime: formatUptime(os.uptime()),
-                node_version: process.version,
-                memory: {
-                    total: formatBytes(totalMem),
-                    used: formatBytes(usedMem),
-                    free: formatBytes(freeMem),
-                    percent: Math.round((usedMem / totalMem) * 100)
-                },
-                cpu: {
-                    model: cpus[0].model,
-                    speed: `${cpus[0].speed} MHz`,
-                    cores: cpus.length,
-                    load: os.loadavg()[0].toFixed(2)
-                }
-            },
-            requests: recentRequests
-        });
-    } catch (e) {
-        res.status(500).json({ status: false });
+        await bratHandler(req, res);
+    } catch (err: any) {
+        res.status(500).json({ status: false, message: err.message });
     }
 });
 
-app.get('/stats', (req: Request, res: Response) => {
-    res.sendFile(path.join(process.cwd(), 'public', 'stats.html'));
+// API Dasar
+app.get('/config', (req, res) => {
+    const currentConfig = { ...config };
+    currentConfig.settings.visitors = visit().toString();
+    res.json({ creator: config.settings.creator, ...currentConfig });
 });
 
-app.get('/config', (req: Request, res: Response) => {
-    try {
-        const currentConfig = JSON.parse(JSON.stringify(config));
-        currentConfig.settings.visitors = visit().toString();
-        res.json({ creator: config.settings.creator, ...currentConfig });
-    } catch (error) { res.status(500).json({ creator: config.settings.creator, error: "Internal Server Error" }); }
+app.get('/stats/data', (req, res) => {
+    const totalMem = os.totalmem();
+    const usedMem = totalMem - os.freemem();
+    res.json({
+        status: true,
+        server: {
+            uptime: formatUptime(os.uptime()),
+            memory: { total: formatBytes(totalMem), used: formatBytes(usedMem), percent: Math.round((usedMem / totalMem) * 100) },
+            cpu: { model: os.cpus()[0].model, cores: os.cpus().length }
+        },
+        requests: recentRequests
+    });
 });
 
-app.get('/', (req: Request, res: Response) => {
-    incrementVisitor();
-    res.sendFile(path.join(process.cwd(), 'public', 'landing.html'));
-});
+// Pages
+app.get('/', (req, res) => { incrementVisitor(); res.sendFile(path.join(process.cwd(), 'public', 'landing.html')); });
+app.get('/docs', (req, res) => { res.sendFile(path.join(process.cwd(), 'public', 'docs.html')); });
+app.get('/stats', (req, res) => { res.sendFile(path.join(process.cwd(), 'public', 'stats.html')); });
 
-app.get('/docs', (req: Request, res: Response) => { 
-    res.sendFile(path.join(process.cwd(), 'public', 'docs.html')); 
-});
-
-app.use((req: Request, res: Response) => {
-    if (req.accepts('html')) {
-        const possible404 = [path.join(process.cwd(), 'public', '404.html'), path.join(__dirname, 'public', '404.html')];
-        for (const p of possible404) { if (fs.existsSync(p)) return res.status(404).sendFile(p); }
-    }
+// 404 Handler
+app.use((req, res) => {
     res.status(404).json({ status: false, creator: config.settings.creator, message: "Route not found" });
 });
 
-initAutoLoad(app, config, configPath);
-
-// Pencegahan bentrok port di environment production (Vercel)
+// Server Listen (Hanya untuk Lokal)
 if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
-    });
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
-// WAJIB UNTUK VERCEL: Export aplikasi express
 export default app;
